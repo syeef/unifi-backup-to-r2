@@ -1,7 +1,9 @@
 export default {
-	async fetch(request, env) {
-		const response = await handleLoginAndBackup(request, env);
-		return response;
+	async fetch(request, env, ctx) {
+		return handleLoginAndBackup(request, env);
+	},
+	async scheduled(event, env, ctx) {
+		ctx.waitUntil(handleLoginAndBackup(env));
 	},
 };
 
