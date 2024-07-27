@@ -82,7 +82,7 @@ async function handleLoginAndBackup(request, env) {
 	}
 }
 
-async function waitForBackupFileReady(url, cookie, maxAttempts = 30, delayBetweenAttempts = 10000) {
+async function waitForBackupFileReady(url, cookie, maxAttempts = 3, delayBetweenAttempts = 60000) {
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		try {
 			const response = await fetch(url, {
