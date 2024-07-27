@@ -1,13 +1,18 @@
 export default {
 	async fetch(request, env, ctx) {
-		return handleLoginAndBackup(request, env);
+		return handleLoginAndBackup(env);
 	},
-	async scheduled(event, env, ctx) {
+	async scheduled(controller, env, ctx) {
 		ctx.waitUntil(handleLoginAndBackup(env));
 	},
 };
 
-async function handleLoginAndBackup(request, env) {
+async function handleLoginAndBackup(env) {
+	if (!env || !env.BASE_URL || !env.USERNAME || !env.PASSWORD) {
+		console.error('Environment variables are not properly set');
+		return new Response('Server configuration error', { status: 500 });
+	}
+
 	const loginUrl = env.BASE_URL + '/api/login';
 	const backupUrl = env.BASE_URL + '/api/s/default/cmd/backup';
 
@@ -81,6 +86,8 @@ async function handleLoginAndBackup(request, env) {
 		});
 	}
 }
+
+// The rest of the functions (waitForBackupFileReady, downloadAndUploadToR2, getCurrentTimestamp, sleep) remain unchanged
 
 async function waitForBackupFileReady(url, cookie, maxAttempts = 3, delayBetweenAttempts = 60000) {
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
