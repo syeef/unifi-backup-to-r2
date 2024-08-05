@@ -1,13 +1,13 @@
 export default {
 	async fetch(request, env, ctx) {
-		return handleLoginAndBackup(env);
+		return handleLoginAndBackup(env, false);
 	},
 	async scheduled(controller, env, ctx) {
-		ctx.waitUntil(handleLoginAndBackup(env));
+		ctx.waitUntil(handleLoginAndBackup(env, true));
 	},
 };
 
-async function handleLoginAndBackup(env) {
+async function handleLoginAndBackup(env, isCronTrigger) {
 	if (!env || !env.BASE_URL || !env.USERNAME || !env.PASSWORD) {
 		console.error('Environment variables are not properly set');
 		return new Response('Server configuration error', { status: 500 });
@@ -21,11 +21,17 @@ async function handleLoginAndBackup(env) {
 		password: env.PASSWORD,
 	});
 
+	const headers = {
+		'Content-Type': 'application/json',
+	};
+
+	if (isCronTrigger && env.USER_AGENT) {
+		headers['User-Agent'] = env.USER_AGENT;
+	}
+
 	const loginInit = {
 		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
+		headers: headers,
 		body: loginPayload,
 	};
 
@@ -41,12 +47,18 @@ async function handleLoginAndBackup(env) {
 				cmd: 'async-backup',
 			});
 
+			const backupHeaders = {
+				'Content-Type': 'application/json',
+				Cookie: loginResponse.headers.get('set-cookie'), // Pass the session cookie
+			};
+
+			if (isCronTrigger && env.USER_AGENT) {
+				backupHeaders['User-Agent'] = env.USER_AGENT;
+			}
+
 			const backupInit = {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Cookie: loginResponse.headers.get('set-cookie'), // Pass the session cookie
-				},
+				headers: backupHeaders,
 				body: backupPayload,
 			};
 
@@ -58,12 +70,12 @@ async function handleLoginAndBackup(env) {
 			if (backupResult.meta && backupResult.meta.rc === 'ok') {
 				// Backup triggered successfully, wait for it to complete and check file size
 				const fileUrl = env.BASE_URL + '/dl/backup/8.0.7.unf';
-				await waitForBackupFileReady(fileUrl, loginResponse.headers.get('set-cookie'));
+				await waitForBackupFileReady(fileUrl, loginResponse.headers.get('set-cookie'), env, isCronTrigger);
 
 				const timestamp = getCurrentTimestamp();
 				const filename = `network_backup_${timestamp}_8.0.7.unf`;
 
-				const uploadResponse = await downloadAndUploadToR2(fileUrl, filename, loginResponse.headers.get('set-cookie'), env);
+				const uploadResponse = await downloadAndUploadToR2(fileUrl, filename, loginResponse.headers.get('set-cookie'), env, isCronTrigger);
 				return uploadResponse;
 			} else {
 				return new Response('Backup trigger failed.', {
@@ -87,14 +99,17 @@ async function handleLoginAndBackup(env) {
 	}
 }
 
-// The rest of the functions (waitForBackupFileReady, downloadAndUploadToR2, getCurrentTimestamp, sleep) remain unchanged
+async function waitForBackupFileReady(url, cookie, env, isCronTrigger, maxAttempts = 3, delayBetweenAttempts = 60000) {
+	const headers = { Cookie: cookie };
+	if (isCronTrigger && env.USER_AGENT) {
+		headers['User-Agent'] = env.USER_AGENT;
+	}
 
-async function waitForBackupFileReady(url, cookie, maxAttempts = 3, delayBetweenAttempts = 60000) {
 	for (let attempt = 0; attempt < maxAttempts; attempt++) {
 		try {
 			const response = await fetch(url, {
 				method: 'HEAD',
-				headers: { Cookie: cookie },
+				headers: headers,
 			});
 
 			if (response.ok) {
@@ -117,26 +132,25 @@ async function waitForBackupFileReady(url, cookie, maxAttempts = 3, delayBetween
 	throw new Error('Backup file did not reach the expected size within the allocated time');
 }
 
-async function downloadAndUploadToR2(url, key, cookie, env, retries = 3, delay = 5000) {
+async function downloadAndUploadToR2(url, key, cookie, env, isCronTrigger, retries = 3, delay = 5000) {
+	const headers = { Cookie: cookie };
+	if (isCronTrigger && env.USER_AGENT) {
+		headers['User-Agent'] = env.USER_AGENT;
+	}
+
 	for (let attempt = 1; attempt <= retries; attempt++) {
 		try {
-			const response = await fetch(url, {
-				headers: { Cookie: cookie },
-			});
+			const response = await fetch(url, { headers });
 			if (!response.ok) {
 				throw new Error(`Failed to fetch file: ${response.statusText}`);
 			}
 
-			// Get the content type from the response headers
 			const contentType = response.headers.get('Content-Type') || 'application/octet-stream';
-
-			// Read the response as an ArrayBuffer to preserve binary data
 			const arrayBuffer = await response.arrayBuffer();
 
 			console.log(`Attempt ${attempt}: Downloaded file size: ${arrayBuffer.byteLength} bytes`);
 
 			if (arrayBuffer.byteLength > 40000) {
-				// Upload the ArrayBuffer directly to Cloudflare R2
 				const r2Object = await env.BUCKET_UNIFI_BACKUPS.put(key, arrayBuffer, {
 					contentType: contentType,
 				});

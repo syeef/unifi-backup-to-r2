@@ -37,9 +37,13 @@ crons = ["0 1 * * sun"]
 ```
 [vars]
 BASE_URL = "https://example.com"
+USER_AGENT = "<YOUR_CUSTOM_USER_AGENT>"
 ```
 
 - Defines the BASE_URL variable used throughout the script
+- Defines the USER_AGENT variable used throughout the script; this is to the allow the use of Cloudflare Custom Firewall Rules
+  - Example of Cloudflare Custom Firewall Rule, ensure the user-agent is equal to what is specified here; the HTTP Version (`http.request.version`) and AS Num (`ip.geoip.asnum`) were obtained by observing logged events from Firewall Events
+  - `(http.user_agent eq "<YOUR_CUSTOM_USER_AGENT>" and http.request.version eq "HTTP/1.1" and ip.geoip.asnum in {132892 13335})`
 
 ```
 [[r2_buckets]]
